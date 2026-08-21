@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Image Compare</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand" aria-label="Image Compare">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="img">
+              <path d="M4 5.5h16v13H4z" />
+              <path d="M12 5.5v13M4 14l4-4 4 4 3-3 5 5" />
+              <circle cx="17" cy="9" r="1.4" />
+            </svg>
+          </span>
+          <span>
+            <strong>Image Compare</strong>
+            <small>локальне порівняння</small>
+          </span>
+        </div>
+
+        <div class="mode-switch" role="group" aria-label="Кількість зображень">
+          <span class="control-label">Режим</span>
+          <button class="mode-button is-active" type="button" data-mode="2" aria-pressed="true">2</button>
+          <button class="mode-button" type="button" data-mode="3" aria-pressed="false">3</button>
+          <button class="mode-button" type="button" data-mode="4" aria-pressed="false">4</button>
+        </div>
+
+        <div class="toolbar">
+          <label class="fit-control">
+            <span class="control-label">Масштаб</span>
+            <select id="fitMode" aria-label="Масштабування зображень">
+              <option value="contain">Вписати</option>
+              <option value="cover">Заповнити</option>
+            </select>
+          </label>
+          <button id="resetSplit" class="tool-button" type="button" title="Повернути маніпулятор у центр">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18" /></svg>
+            <span>Центр</span>
+          </button>
+          <button id="clearAll" class="tool-button" type="button" title="Прибрати всі зображення">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M9 7V4h6v3M8 10v8M12 10v8M16 10v8M7 7l1 14h8l1-14" /></svg>
+            <span>Очистити</span>
+          </button>
+          <button id="fullscreenButton" class="tool-button icon-only" type="button" title="Повноекранний режим" aria-label="Повноекранний режим">
+            <svg class="enter-fullscreen" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" /></svg>
+            <svg class="exit-fullscreen" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5" /></svg>
+          </button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section id="viewer" class="viewer" aria-label="Область порівняння">
+          <div
+            id="compareStage"
+            class="compare-stage"
+            data-mode="2"
+            tabindex="0"
+            aria-label="Область порівняння. Перетягніть сюди зображення."
+          >
+            <div id="imageLayers" class="image-layers" aria-hidden="true"></div>
+            <div id="dropZones" class="drop-zones"></div>
+
+            <div id="comparisonControls" class="comparison-controls" aria-hidden="true">
+              <div id="verticalControl" class="axis-control axis-control--vertical" title="Перетягніть ліворуч або праворуч">
+                <span class="axis-line"></span>
+              </div>
+              <div id="horizontalControl" class="axis-control axis-control--horizontal" title="Перетягніть вгору або вниз">
+                <span class="axis-line"></span>
+              </div>
+              <div id="crossHandle" class="cross-handle" title="Перетягніть маніпулятор">
+                <span></span><span></span><span></span><span></span>
+              </div>
+            </div>
+
+            <div id="startHint" class="start-hint">
+              <span class="start-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 15V3M8 7l4-4 4 4M5 13v7h14v-7" /></svg>
+              </span>
+              <strong>Перетягніть зображення у секції</strong>
+              <small>або натисніть на потрібну секцію, щоб обрати файл</small>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="statusbar">
+        <div id="statusText" class="status-text">Очікування зображень · режим 2</div>
+        <div class="privacy-note">
+          <span class="privacy-dot" aria-hidden="true"></span>
+          Файли залишаються на цьому комп’ютері
+        </div>
+        <button id="colorInfoButton" class="text-button" type="button">ICC / колір</button>
+      </footer>
+    </div>
+
+    <input id="fileInput" class="visually-hidden" type="file" accept="image/*" multiple />
+
+    <dialog id="colorDialog" class="info-dialog">
+      <form method="dialog">
+        <div class="dialog-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7.5v.5" /></svg>
+        </div>
+        <div>
+          <h2>Відображення кольору</h2>
+          <p>
+            Файли показуються напряму через браузерний елемент <code>&lt;img&gt;</code>. Тулза не перемальовує
+            їх у canvas, не конвертує та не видаляє вбудований ICC-профіль.
+          </p>
+          <p>
+            Фактичний результат залежить від color management браузера, профілю монітора в операційній системі
+            та підтримки формату. Для точної оцінки використовуйте актуальний Chrome, Edge або Firefox на
+            відкаліброваному дисплеї.
+          </p>
+          <button class="dialog-close" value="close">Зрозуміло</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="app.js"></script>
+  </body>
+</html>
