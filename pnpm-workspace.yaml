@@ -1,6 +1,9 @@
 packages:
   - "."
 
+patchedDependencies:
+  hdrify@1.1.4: patches/hdrify@1.1.4.patch
+
 allowBuilds:
   esbuild: true
 

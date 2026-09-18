@@ -1,6 +1,8 @@
 import UTIF from "utif";
-import { applyToneMapping, readExr, readHdr } from "hdrify";
+import { applyToneMapping, chromaticitiesToLinearColorSpace, readExr, readHdr } from "hdrify";
 import { deflate } from "pako";
+import { FloatType, RGBAFormat } from "three";
+import { EXRLoader } from "three/addons/loaders/EXRLoader.js";
 
 const PNG_SIGNATURE = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 const CRC_TABLE = createCrcTable();
@@ -46,14 +48,53 @@ export function decodeTiff(input) {
 
 export function decodeHdr(input, format) {
   const bytes = toUint8(input);
-  const image = format === "exr" ? readExr(bytes) : readHdr(bytes);
+  if (format === "exr") {
+    try {
+      return normalizeHdrImage(readExr(bytes), "HDRify");
+    } catch (primaryError) {
+      try {
+        return decodeExrWithThree(bytes);
+      } catch (fallbackError) {
+        const primaryMessage = errorMessage(primaryError);
+        const fallbackMessage = errorMessage(fallbackError);
+        throw new Error(`Не вдалося декодувати EXR. HDRify: ${primaryMessage}; Three.js: ${fallbackMessage}`);
+      }
+    }
+  }
+
+  return normalizeHdrImage(readHdr(bytes), "HDRify");
+}
+
+function normalizeHdrImage(image, decoder) {
   return {
     width: image.width,
     height: image.height,
     data: image.data,
     metadata: image.metadata ?? {},
     sourceColorSpace: image.linearColorSpace ?? "linear-rec709",
+    decoder,
   };
+}
+
+function decodeExrWithThree(bytes) {
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  const parsed = new EXRLoader().setDataType(FloatType).setOutputFormat(RGBAFormat).parse(buffer);
+  if (!parsed?.width || !parsed?.height || !(parsed.data instanceof Float32Array)) {
+    throw new Error("декодер не повернув Float32 RGBA");
+  }
+  const chromaticities = parsed.header?.chromaticities;
+  return {
+    width: parsed.width,
+    height: parsed.height,
+    data: parsed.data,
+    metadata: parsed.header ?? {},
+    sourceColorSpace: chromaticitiesToLinearColorSpace(chromaticities ?? {}) ?? "linear-rec709",
+    decoder: "Three.js",
+  };
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function renderHdr(image, exposureEv = 0, toneMapping = "aces") {

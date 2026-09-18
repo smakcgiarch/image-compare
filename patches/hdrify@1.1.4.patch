@@ -1,0 +1,62 @@
+diff --git a/dist/exr/decompressPiz.js b/dist/exr/decompressPiz.js
+index 77582cb..7df9c87 100644
+--- a/dist/exr/decompressPiz.js
++++ b/dist/exr/decompressPiz.js
+@@ -203,20 +203,22 @@ export function decompressPiz(compressedData, width, channels, _dataSize, blockH
+     // Read compressed data - it starts right after the bitmap
+     const compressedBuffer = new Uint8Array(compressedData.buffer, compressedData.byteOffset + offset, compressedSize);
+     const numChannels = channels.length;
+-    const primaryChannel = channels[0];
+-    if (!primaryChannel) {
++    if (!channels[0]) {
+         throw new Error('Invalid PIZ data: no channels');
+     }
+-    const bytesPerChannel = getBytesPerChannel(primaryChannel.pixelType);
+-    const u16sPerChannelValue = bytesPerChannel / INT16_SIZE; // 1 for HALF, 2 for FLOAT
+     const pixelsPerChannel = width * blockHeight;
+-    const u16sPerChannel = pixelsPerChannel * u16sPerChannelValue;
+-    const totalU16 = numChannels * u16sPerChannel;
++    const wordsPerSample = channels.map((channel) => getBytesPerChannel(channel.pixelType) / INT16_SIZE);
++    const channelWordOffsets = [];
++    let totalU16 = 0;
++    for (let c = 0; c < numChannels; c++) {
++        channelWordOffsets.push(totalU16);
++        totalU16 += pixelsPerChannel * wordsPerSample[c];
++    }
+     const outputBuffer = new Uint16Array(totalU16);
+     hufUncompress(compressedBuffer, new DataView(compressedBuffer.buffer, compressedBuffer.byteOffset, compressedBuffer.byteLength), { value: 0 }, compressedSize, outputBuffer, totalU16);
+     for (let c = 0; c < numChannels; c++) {
+-        const channelOffset = c * u16sPerChannel;
+-        if (u16sPerChannelValue === 1) {
++        const channelOffset = channelWordOffsets[c];
++        if (wordsPerSample[c] === 1) {
+             wav2Decode(outputBuffer, channelOffset, width, 1, blockHeight, width, n);
+         }
+         else {
+@@ -226,15 +228,23 @@ export function decompressPiz(compressedData, width, channels, _dataSize, blockH
+         }
+     }
+     applyLut(lut, outputBuffer, totalU16);
+-    const resultSize = width * blockHeight * numChannels * bytesPerChannel;
++    const channelBytes = channels.map((channel) => getBytesPerChannel(channel.pixelType));
++    const channelLineOffsets = [];
++    let bytesPerScanline = 0;
++    for (const bytes of channelBytes) {
++        channelLineOffsets.push(bytesPerScanline);
++        bytesPerScanline += width * bytes;
++    }
++    const resultSize = blockHeight * bytesPerScanline;
+     const result = new Uint8Array(resultSize);
+     const resultView = new DataView(result.buffer, result.byteOffset, result.byteLength);
+     // Output is scanline-major, channel-major-per-scanline (same convention as every other codec).
+     for (let y = 0; y < blockHeight; y++) {
+         for (let c = 0; c < numChannels; c++) {
+-            const lineOffset = (y * numChannels + c) * width * bytesPerChannel;
++            const bytesPerChannel = channelBytes[c];
++            const lineOffset = y * bytesPerScanline + channelLineOffsets[c];
+             for (let x = 0; x < width; x++) {
+-                const base = c * u16sPerChannel + (y * width + x) * u16sPerChannelValue;
++                const base = channelWordOffsets[c] + (y * width + x) * wordsPerSample[c];
+                 if (bytesPerChannel === INT16_SIZE) {
+                     resultView.setUint16(lineOffset + x * INT16_SIZE, outputBuffer[base], true);
+                 }

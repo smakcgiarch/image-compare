@@ -30,7 +30,7 @@ await copyFile(
   path.join(vendorDir, "libheif-js.LICENSE"),
 );
 
-const packageNames = ["utif", "pako", "hdrify", "libheif-js"];
+const packageNames = ["utif", "pako", "hdrify", "three", "libheif-js"];
 const notices = ["# Bundled third-party software\n"];
 
 for (const packageName of packageNames) {

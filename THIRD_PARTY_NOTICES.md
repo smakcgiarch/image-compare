@@ -4,6 +4,7 @@
 - `pako 3.0.2` — MIT — zlib compression for color-managed PNG previews.
 - `hdrify 1.1.4` — MIT — OpenEXR and Radiance HDR decoding and tonemapping.
 - `libheif-js 1.23.2` — LGPL-3.0 — HEIC/HEIF decoding through libheif/WebAssembly.
+- `three 0.186.0` — MIT — fallback OpenEXR decoding for B44/B44A and DWA/DWAB files.
 
 The HEIC/HEIF decoder is distributed as a separate, unmodified bundle in
 `vendor/libheif-bundle.js`, so it can be inspected and replaced independently.

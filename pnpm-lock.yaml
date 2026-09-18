@@ -4,19 +4,25 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  hdrify@1.1.4: 56cfc7c73ae77a642853067c5f5eaa21b00ca591080efba6827d1cacea33e529
+
 importers:
 
   .:
     dependencies:
       hdrify:
         specifier: 1.1.4
-        version: 1.1.4
+        version: 1.1.4(patch_hash=56cfc7c73ae77a642853067c5f5eaa21b00ca591080efba6827d1cacea33e529)
       libheif-js:
         specifier: 1.23.2
         version: 1.23.2
       pako:
         specifier: 3.0.2
         version: 3.0.2
+      three:
+        specifier: 0.186.0
+        version: 0.186.0
       utif:
         specifier: 3.1.0
         version: 3.1.0
@@ -217,6 +223,9 @@ packages:
   pako@3.0.2:
     resolution: {integrity: sha512-uBv6IT2aT1A78iU6dpNEbf6+CyhlV/6g9JlJs9kpgjFGFhruIICVRysF/W0SLzXg5+hCl+KroH7e4YUyfEmgLg==}
 
+  three@0.186.0:
+    resolution: {integrity: sha512-cr/fIM2ddMSVbYVgkfD4jLJv7Fh/8ZTjvo+7gQeSVGUZHxpx9FDwoL5iC7hUz/LiRA8wMbqfnb90xKfm1/HHkQ==}
+
   utif@3.1.0:
     resolution: {integrity: sha512-WEo4D/xOvFW53K5f5QTaTbbiORcm2/pCL9P6qmJnup+17eYfKaEhDeX9PeQkuyEoIxlbGklDuGl8xwuXYMrrXQ==}
 
@@ -338,7 +347,7 @@ snapshots:
 
   fflate@0.8.3: {}
 
-  hdrify@1.1.4:
+  hdrify@1.1.4(patch_hash=56cfc7c73ae77a642853067c5f5eaa21b00ca591080efba6827d1cacea33e529):
     dependencies:
       buffer: 6.0.3
       fflate: 0.8.3
@@ -353,6 +362,8 @@ snapshots:
   pako@1.0.11: {}
 
   pako@3.0.2: {}
+
+  three@0.186.0: {}
 
   utif@3.1.0:
     dependencies:

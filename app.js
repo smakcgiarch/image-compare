@@ -218,7 +218,7 @@ async function setSlot(index, file) {
     Object.assign(slot, {
       width: decoded.width,
       height: decoded.height,
-      bits: "linear float",
+      bits: decoded.decoder === "Three.js" ? "linear float · EXR fallback" : "linear float",
       formatLabel: extension.toUpperCase(),
       colorLabel: `${describeLinearSpace(decoded.sourceColorSpace)} → sRGB · ${toneName(state.toneMapping)}`,
       hdrData: decoded,

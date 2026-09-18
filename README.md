@@ -14,7 +14,8 @@
 - Через локальний декодер: TIFF/TIF, HEIC/HEIF, OpenEXR/EXR, Radiance HDR.
 - TIFF: основна сторінка, RGB/Grayscale/CMYK, LZW/ZIP/JPEG/PackBits та інші компресії UTIF; preview має 8 біт на канал.
 - HEIC/HEIF: основне зображення контейнера через `libheif`.
-- EXR/HDR: linear float preview з Exposure від −8 до +8 EV і ACES, Neutral, AgX або Reinhard tonemapping.
+- EXR/HDR: linear float preview з Exposure від −8 до +8 EV і ACES, Neutral, AgX або Reinhard tonemapping. Для EXR використовується резервний Three.js decoder, якщо основний decoder не підтримує compression або layout файла.
+- Unreal multi-channel EXR: підтримуються PIZ-файли зі змішаними `HALF`/`FLOAT` каналами та додатковими Albedo/Normal passes; для preview беруться основні `R`, `G`, `B`, `A`.
 
 ## Керування
 
