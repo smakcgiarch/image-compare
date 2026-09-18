@@ -186,6 +186,17 @@ select:focus-visible,
   display: none;
 }
 
+.hdr-tonemap-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hdr-tonemap-controls[hidden] {
+  display: none;
+}
+
+.transform-control,
 .exposure-control,
 .tone-control {
   display: flex;
@@ -214,6 +225,7 @@ select:focus-visible,
 }
 
 .fit-control select,
+.transform-control select,
 .tone-control select {
   height: 34px;
   padding: 0 29px 0 10px;
@@ -225,6 +237,10 @@ select:focus-visible,
 
 .tone-control select {
   width: 94px;
+}
+
+.transform-control select {
+  width: 142px;
 }
 
 .tool-button,
@@ -809,6 +825,7 @@ body.is-dragging-divider * {
   .brand small,
   .fit-control .control-label,
   .tone-control .control-label,
+  .transform-control .control-label,
   .exposure-control .control-label,
   .tool-button span,
   .privacy-note {
@@ -873,6 +890,12 @@ body.is-dragging-divider * {
     padding: 7px 0 0;
     border-top: 1px solid var(--line);
     border-right: 0;
+  }
+
+  .hdr-tonemap-controls {
+    display: flex;
+    flex: 1;
+    min-width: 0;
   }
 
   .exposure-control {

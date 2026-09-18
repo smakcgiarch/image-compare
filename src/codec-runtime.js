@@ -1,5 +1,11 @@
 import UTIF from "utif";
-import { applyToneMapping, chromaticitiesToLinearColorSpace, readExr, readHdr } from "hdrify";
+import {
+  applyToneMapping,
+  chromaticitiesToLinearColorSpace,
+  convertFloat32ToLinearColorSpace,
+  readExr,
+  readHdr,
+} from "hdrify";
 import { deflate } from "pako";
 import { FloatType, RGBAFormat } from "three";
 import { EXRLoader } from "three/addons/loaders/EXRLoader.js";
@@ -50,7 +56,7 @@ export function decodeHdr(input, format) {
   const bytes = toUint8(input);
   if (format === "exr") {
     try {
-      return normalizeHdrImage(readExr(bytes), "HDRify");
+      return normalizeHdrImage(readExr(bytes), "HDRify", "exr");
     } catch (primaryError) {
       try {
         return decodeExrWithThree(bytes);
@@ -62,10 +68,11 @@ export function decodeHdr(input, format) {
     }
   }
 
-  return normalizeHdrImage(readHdr(bytes), "HDRify");
+  return normalizeHdrImage(readHdr(bytes), "HDRify", "hdr");
 }
 
-function normalizeHdrImage(image, decoder) {
+function normalizeHdrImage(image, decoder, format) {
+  const suggestion = suggestDisplayTransform(format, image.metadata ?? {});
   return {
     width: image.width,
     height: image.height,
@@ -73,6 +80,9 @@ function normalizeHdrImage(image, decoder) {
     metadata: image.metadata ?? {},
     sourceColorSpace: image.linearColorSpace ?? "linear-rec709",
     decoder,
+    format,
+    suggestedDisplayTransform: suggestion.mode,
+    displayTransformEvidence: suggestion.evidence,
   };
 }
 
@@ -83,6 +93,7 @@ function decodeExrWithThree(bytes) {
     throw new Error("декодер не повернув Float32 RGBA");
   }
   const chromaticities = parsed.header?.chromaticities;
+  const suggestion = suggestDisplayTransform("exr", parsed.header ?? {});
   return {
     width: parsed.width,
     height: parsed.height,
@@ -90,6 +101,9 @@ function decodeExrWithThree(bytes) {
     metadata: parsed.header ?? {},
     sourceColorSpace: chromaticitiesToLinearColorSpace(chromaticities ?? {}) ?? "linear-rec709",
     decoder: "Three.js",
+    format: "exr",
+    suggestedDisplayTransform: suggestion.mode,
+    displayTransformEvidence: suggestion.evidence,
   };
 }
 
@@ -97,8 +111,21 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function renderHdr(image, exposureEv = 0, toneMapping = "aces") {
+export function renderHdr(image, exposureEv = 0, toneMapping = "aces", displayTransform = "tonemap") {
   const safeData = new Float32Array(image.data);
+  if (displayTransform === "linear-srgb" || displayTransform === "encoded-srgb") {
+    const displayData = displayTransform === "linear-srgb" && image.sourceColorSpace !== "linear-rec709"
+      ? convertFloat32ToLinearColorSpace(
+          safeData,
+          image.width,
+          image.height,
+          image.sourceColorSpace ?? "linear-rec709",
+          "linear-rec709",
+        )
+      : safeData;
+    return renderDisplayEncoded(image, displayData, displayTransform);
+  }
+
   const rgb = applyToneMapping(safeData, image.width, image.height, {
     exposure: 2 ** Number(exposureEv || 0),
     toneMapping,
@@ -114,6 +141,51 @@ export function renderHdr(image, exposureEv = 0, toneMapping = "aces") {
     rgba[rgbaIndex++] = Number.isFinite(alpha) ? Math.round(clamp01(alpha) * 255) : 255;
   }
   return rgba;
+}
+
+function renderDisplayEncoded(image, data, displayTransform) {
+  const rgba = new Uint8Array(image.width * image.height * 4);
+  for (let pixel = 0; pixel < image.width * image.height; pixel += 1) {
+    const source = pixel * 4;
+    rgba[source] = encodeDisplayChannel(data[source], displayTransform);
+    rgba[source + 1] = encodeDisplayChannel(data[source + 1], displayTransform);
+    rgba[source + 2] = encodeDisplayChannel(data[source + 2], displayTransform);
+    const alpha = image.data[source + 3];
+    rgba[source + 3] = Number.isFinite(alpha) ? Math.round(clamp01(alpha) * 255) : 255;
+  }
+  return rgba;
+}
+
+function encodeDisplayChannel(value, displayTransform) {
+  const normalized = clamp01(Number.isFinite(value) ? value : 0);
+  const encoded = displayTransform === "linear-srgb"
+    ? normalized <= 0.0031308
+      ? normalized * 12.92
+      : 1.055 * normalized ** (1 / 2.4) - 0.055
+    : normalized;
+  return Math.round(clamp01(encoded) * 255);
+}
+
+function suggestDisplayTransform(format, metadata) {
+  if (format === "hdr") return { mode: "tonemap", evidence: "Radiance HDR" };
+
+  const candidates = [
+    ["unreal/colorSpace/destination", metadata?.["unreal/colorSpace/destination"]],
+    ["oiio:ColorSpace", metadata?.["oiio:ColorSpace"]],
+    ["ColorSpace", metadata?.ColorSpace],
+    ["colorSpace", metadata?.colorSpace],
+  ];
+  for (const [key, rawValue] of candidates) {
+    if (typeof rawValue !== "string" || !rawValue.trim()) continue;
+    const value = rawValue.trim().toLowerCase();
+    if (value.includes("linear") || value.includes("acescg")) {
+      return { mode: "linear-srgb", evidence: `${key}: ${rawValue.trim()}` };
+    }
+    if (value === "srgb" || value.startsWith("srgb\0") || value.includes("display srgb")) {
+      return { mode: "encoded-srgb", evidence: `${key}: ${rawValue.trim()}` };
+    }
+  }
+  return { mode: "linear-srgb", evidence: "EXR metadata unresolved · scene-linear fallback" };
 }
 
 export function encodePngRgba(rgbaInput, width, height, options = {}) {

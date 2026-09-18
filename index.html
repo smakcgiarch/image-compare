@@ -33,20 +33,31 @@
 
         <div class="toolbar">
           <div id="hdrControls" class="hdr-controls" hidden>
-            <label class="exposure-control">
-              <span class="control-label">Exposure</span>
-              <input id="exposureInput" type="range" min="-8" max="8" step="0.25" value="0" />
-              <output id="exposureOutput" for="exposureInput">0.0 EV</output>
-            </label>
-            <label class="tone-control">
-              <span class="control-label">Tone map</span>
-              <select id="toneMapping" aria-label="HDR tonemapping">
-                <option value="aces">ACES</option>
-                <option value="neutral">Neutral</option>
-                <option value="agx">AgX</option>
-                <option value="reinhard">Reinhard</option>
+            <label class="transform-control">
+              <span class="control-label">EXR колір</span>
+              <select id="hdrTransform" aria-label="Перетворення кольору EXR та HDR">
+                <option value="auto">Auto</option>
+                <option value="linear-srgb">Linear → sRGB</option>
+                <option value="encoded-srgb">Already sRGB</option>
+                <option value="tonemap">HDR tone map</option>
               </select>
             </label>
+            <div id="toneMapControls" class="hdr-tonemap-controls" hidden>
+              <label class="exposure-control">
+                <span class="control-label">Exposure</span>
+                <input id="exposureInput" type="range" min="-8" max="8" step="0.25" value="0" />
+                <output id="exposureOutput" for="exposureInput">0.0 EV</output>
+              </label>
+              <label class="tone-control">
+                <span class="control-label">Tone map</span>
+                <select id="toneMapping" aria-label="HDR tonemapping">
+                  <option value="aces">ACES</option>
+                  <option value="neutral">Neutral</option>
+                  <option value="agx">AgX</option>
+                  <option value="reinhard">Reinhard</option>
+                </select>
+              </label>
+            </div>
           </div>
           <label class="fit-control">
             <span class="control-label">Масштаб</span>
@@ -136,8 +147,14 @@
           </p>
           <p>
             TIFF і HEIC/HEIF декодуються локально. Сумісний RGB ICC або NCLX-профіль переноситься у службовий
-            PNG-preview, після чого браузер виконує color transform. EXR/HDR перетворюються з linear float у sRGB
-            через обраний tonemapping та Exposure.
+            PNG-preview, після чого браузер виконує color transform. Для EXR режим <strong>Auto</strong> повторює
+            політику RenderAudit: metadata з sRGB destination показується без повторного transform, а scene-linear
+            EXR отримує лише linear-to-sRGB transfer — без додаткової tone curve. Якщо metadata недостатньо,
+            виберіть вручну <strong>Already sRGB</strong> або <strong>Linear → sRGB</strong>.
+          </p>
+          <p>
+            <strong>HDR tone map</strong> — окремий творчий режим з Exposure та ACES/Neutral/AgX/Reinhard. Для
+            Radiance HDR він обирається автоматично; для EXR вмикайте його лише коли справді потрібне HDR compression.
           </p>
           <p>
             Фінальний вигляд також залежить від профілю монітора в операційній системі. Для точної оцінки

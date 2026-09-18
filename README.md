@@ -14,7 +14,8 @@
 - Через локальний декодер: TIFF/TIF, HEIC/HEIF, OpenEXR/EXR, Radiance HDR.
 - TIFF: основна сторінка, RGB/Grayscale/CMYK, LZW/ZIP/JPEG/PackBits та інші компресії UTIF; preview має 8 біт на канал.
 - HEIC/HEIF: основне зображення контейнера через `libheif`.
-- EXR/HDR: linear float preview з Exposure від −8 до +8 EV і ACES, Neutral, AgX або Reinhard tonemapping. Для EXR використовується резервний Three.js decoder, якщо основний decoder не підтримує compression або layout файла.
+- EXR: режими `Auto`, `Linear → sRGB`, `Already sRGB` і окремий творчий `HDR tone map`. Для unsupported compression/layout використовується резервний Three.js decoder.
+- Radiance HDR: в `Auto` використовує Exposure від −8 до +8 EV і ACES, Neutral, AgX або Reinhard tonemapping.
 - Unreal multi-channel EXR: підтримуються PIZ-файли зі змішаними `HALF`/`FLOAT` каналами та додатковими Albedo/Normal passes; для preview беруться основні `R`, `G`, `B`, `A`.
 
 ## Керування
@@ -33,7 +34,9 @@ JPEG, PNG, WebP, AVIF та інші формати, які браузер під
 
 TIFF і HEIC/HEIF декодуються локально. RGB ICC-профіль або HEIF NCLX-опис переноситься у службовий PNG-preview, який потім color-manage-ить браузер. Якщо TIFF використовує профіль, несумісний із RGB-preview (наприклад CMYK), інтерфейс показує попередження про fallback-перетворення декодера.
 
-EXR/HDR не є дисплейними ICC-зображеннями: float RGB перетворюється з визначеного EXR chromaticities/linear space у linear Rec.709, після чого застосовуються Exposure, tonemapping і sRGB transfer function.
+Для EXR режим `Auto` повторює політику RenderAudit denoise pipeline. `unreal/colorSpace/destination=sRGB` або `oiio:ColorSpace=sRGB` означає `Already sRGB`: значення лише обмежуються до 0…1 і записуються в sRGB PNG-preview без другої tone curve. Scene-linear EXR використовує `Linear → sRGB`: за потреби primaries переводяться у linear Rec.709, потім застосовується тільки стандартна sRGB transfer function. Якщо EXR metadata не дає надійної відповіді, `Auto` консервативно вважає його scene-linear; оператор може явно вибрати потрібний режим.
+
+`HDR tone map` застосовує Exposure і обраний ACES/Neutral/AgX/Reinhard mapper. Це правильний автоматичний режим для Radiance HDR, але для EXR його слід вмикати лише навмисно.
 
 Для передбачуваного результату потрібні актуальний color-managed браузер, коректний профіль монітора в операційній системі та формат зображення, який підтримує браузер. Файли нікуди не завантажуються і залишаються на комп’ютері.
 

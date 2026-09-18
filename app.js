@@ -14,6 +14,7 @@ const state = {
   pickerStartIndex: 0,
   exposureEv: 0,
   toneMapping: "aces",
+  hdrTransform: "auto",
   slots: Array.from({ length: MAX_SLOTS }, () => null),
 };
 
@@ -28,6 +29,8 @@ const elements = {
   modeButtons: [...document.querySelectorAll(".mode-button")],
   fitMode: document.querySelector("#fitMode"),
   hdrControls: document.querySelector("#hdrControls"),
+  hdrTransform: document.querySelector("#hdrTransform"),
+  toneMapControls: document.querySelector("#toneMapControls"),
   exposureInput: document.querySelector("#exposureInput"),
   exposureOutput: document.querySelector("#exposureOutput"),
   toneMapping: document.querySelector("#toneMapping"),
@@ -220,7 +223,7 @@ async function setSlot(index, file) {
       height: decoded.height,
       bits: decoded.decoder === "Three.js" ? "linear float · EXR fallback" : "linear float",
       formatLabel: extension.toUpperCase(),
-      colorLabel: `${describeLinearSpace(decoded.sourceColorSpace)} → sRGB · ${toneName(state.toneMapping)}`,
+      colorLabel: hdrColorLabel(decoded),
       hdrData: decoded,
       loading: false,
     });
@@ -301,9 +304,15 @@ async function decodeHeif(bytes) {
 function renderHdrPreview(index, slot) {
   if (!isCurrentSlot(index, slot.token) || !slot.hdrData) return;
   try {
-    const rgba = globalThis.AdvancedCodecs.renderHdr(slot.hdrData, state.exposureEv, state.toneMapping);
+    const transform = effectiveHdrTransform(slot.hdrData);
+    const rgba = globalThis.AdvancedCodecs.renderHdr(
+      slot.hdrData,
+      state.exposureEv,
+      state.toneMapping,
+      transform,
+    );
     const blob = globalThis.AdvancedCodecs.encodePngRgba(rgba, slot.width, slot.height);
-    slot.colorLabel = `${describeLinearSpace(slot.hdrData.sourceColorSpace)} → sRGB · ${toneName(state.toneMapping)} · ${formatEv(state.exposureEv)}`;
+    slot.colorLabel = hdrColorLabel(slot.hdrData);
     attachImageUrl(index, slot, URL.createObjectURL(blob));
   } catch (error) {
     slot.error = friendlyDecodeError(error, slot.formatLabel.toLowerCase());
@@ -453,7 +462,11 @@ function render() {
   const ready = activeSlots.filter((slot) => slot.url && !slot.error).length;
   const loading = activeSlots.filter((slot) => slot.loading).length;
   const hasHdr = activeSlots.some((slot) => slot.hdrData);
+  const hasToneMappedHdr = activeSlots.some(
+    (slot) => slot.hdrData && effectiveHdrTransform(slot.hdrData) === "tonemap",
+  );
   elements.hdrControls.hidden = !hasHdr;
+  elements.toneMapControls.hidden = !hasToneMappedHdr;
   elements.startHint.classList.toggle("is-hidden", activeSlots.length > 0);
   elements.statusText.textContent = loading
     ? `Декодування ${loading} ${loading === 1 ? "файла" : "файлів"}…`
@@ -470,6 +483,22 @@ function setTemporaryStatus(message) {
 
 function toneName(value) {
   return ({ aces: "ACES", neutral: "Neutral", agx: "AgX", reinhard: "Reinhard" })[value] ?? value;
+}
+
+function effectiveHdrTransform(image) {
+  return state.hdrTransform === "auto"
+    ? image.suggestedDisplayTransform ?? (image.format === "hdr" ? "tonemap" : "linear-srgb")
+    : state.hdrTransform;
+}
+
+function hdrColorLabel(image) {
+  const transform = effectiveHdrTransform(image);
+  const auto = state.hdrTransform === "auto" ? "Auto · " : "";
+  if (transform === "encoded-srgb") return `${auto}sRGB encoded · passthrough · без tone curve`;
+  if (transform === "linear-srgb") {
+    return `${auto}${describeLinearSpace(image.sourceColorSpace)} → sRGB transfer · без tone curve`;
+  }
+  return `${auto}${describeLinearSpace(image.sourceColorSpace)} → sRGB · ${toneName(state.toneMapping)} · ${formatEv(state.exposureEv)}`;
 }
 
 function formatEv(value) {
@@ -511,6 +540,11 @@ elements.exposureInput.addEventListener("input", () => {
 
 elements.toneMapping.addEventListener("change", () => {
   state.toneMapping = elements.toneMapping.value;
+  scheduleHdrRender();
+});
+
+elements.hdrTransform.addEventListener("change", () => {
+  state.hdrTransform = elements.hdrTransform.value;
   scheduleHdrRender();
 });
 
