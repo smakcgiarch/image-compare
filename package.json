@@ -1,0 +1,18 @@
+{
+  "name": "image-compare",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Local browser tool for color-managed comparison of native, TIFF, HEIC, EXR, and HDR images.",
+  "scripts": {
+    "build:codecs": "node scripts/build-vendor.mjs"
+  },
+  "dependencies": {
+    "hdrify": "1.1.4",
+    "libheif-js": "1.23.2",
+    "pako": "3.0.2",
+    "utif": "3.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

@@ -1,12 +1,19 @@
 "use strict";
 
 const MAX_SLOTS = 4;
+const ADVANCED_EXTENSIONS = new Set(["tif", "tiff", "heic", "heif", "exr", "hdr"]);
+const SUPPORTED_EXTENSIONS = new Set([
+  "avif", "bmp", "gif", "heic", "heif", "hdr", "jpe", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp", "exr",
+]);
+
 const state = {
   mode: 2,
   splitX: 0.5,
   splitY: 0.5,
   fit: "contain",
   pickerStartIndex: 0,
+  exposureEv: 0,
+  toneMapping: "aces",
   slots: Array.from({ length: MAX_SLOTS }, () => null),
 };
 
@@ -20,6 +27,10 @@ const elements = {
   fileInput: document.querySelector("#fileInput"),
   modeButtons: [...document.querySelectorAll(".mode-button")],
   fitMode: document.querySelector("#fitMode"),
+  hdrControls: document.querySelector("#hdrControls"),
+  exposureInput: document.querySelector("#exposureInput"),
+  exposureOutput: document.querySelector("#exposureOutput"),
+  toneMapping: document.querySelector("#toneMapping"),
   resetSplit: document.querySelector("#resetSplit"),
   clearAll: document.querySelector("#clearAll"),
   fullscreenButton: document.querySelector("#fullscreenButton"),
@@ -32,6 +43,9 @@ const elements = {
 
 const layers = [];
 const zones = [];
+let heifModulePromise = null;
+let hdrRenderTimer = 0;
+let statusTimer = 0;
 
 for (let index = 0; index < MAX_SLOTS; index += 1) {
   const layer = document.createElement("div");
@@ -91,9 +105,12 @@ function activeIndices() {
   return Array.from({ length: state.mode }, (_, index) => index);
 }
 
+function extensionOf(file) {
+  return file.name.split(".").pop()?.toLowerCase() ?? "";
+}
+
 function isImageFile(file) {
-  if (file.type.startsWith("image/")) return true;
-  return /\.(avif|bmp|gif|jpe?g|png|svg|webp)$/i.test(file.name);
+  return file.type.startsWith("image/") || SUPPORTED_EXTENSIONS.has(extensionOf(file));
 }
 
 function formatBytes(bytes) {
@@ -122,35 +139,187 @@ function loadFiles(fileList, startIndex = 0) {
   }
 
   const order = getFillOrder(startIndex);
-  files.slice(0, order.length).forEach((file, offset) => setSlot(order[offset], file));
+  files.slice(0, order.length).forEach((file, offset) => void setSlot(order[offset], file));
 }
 
-function setSlot(index, file) {
+async function setSlot(index, file) {
   clearSlot(index, false);
-  const url = URL.createObjectURL(file);
-  state.slots[index] = {
+  const token = Symbol(file.name);
+  const extension = extensionOf(file);
+  const slot = {
+    token,
     file,
-    url,
+    url: null,
     width: 0,
     height: 0,
+    bits: "",
+    formatLabel: extension ? extension.toUpperCase() : file.type || "IMAGE",
+    colorLabel: "",
+    warning: "",
+    loading: true,
+    error: "",
+    hdrData: null,
   };
+  state.slots[index] = slot;
+  render();
 
+  try {
+    if (!ADVANCED_EXTENSIONS.has(extension)) {
+      slot.colorLabel = "ICC / колір обробляє браузер";
+      slot.loading = false;
+      attachImageUrl(index, slot, URL.createObjectURL(file));
+      return;
+    }
+
+    if (!globalThis.AdvancedCodecs) throw new Error("Не завантажився локальний codec bundle");
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (!isCurrentSlot(index, token)) return;
+
+    if (extension === "tif" || extension === "tiff") {
+      const decoded = globalThis.AdvancedCodecs.decodeTiff(bytes);
+      const blob = globalThis.AdvancedCodecs.encodePngRgba(decoded.rgba, decoded.width, decoded.height, {
+        icc: decoded.icc,
+        profileName: decoded.profile?.name,
+      });
+      Object.assign(slot, {
+        width: decoded.width,
+        height: decoded.height,
+        bits: `${decoded.bits}-bit source`,
+        formatLabel: "TIFF",
+        colorLabel: decoded.colorLabel,
+        warning: decoded.warning,
+        loading: false,
+      });
+      attachImageUrl(index, slot, URL.createObjectURL(blob));
+      return;
+    }
+
+    if (extension === "heic" || extension === "heif") {
+      const decoded = await decodeHeif(bytes);
+      if (!isCurrentSlot(index, token)) return;
+      const blob = globalThis.AdvancedCodecs.encodePngRgba(decoded.rgba, decoded.width, decoded.height, {
+        icc: decoded.color.icc,
+        cicp: decoded.color.cicp,
+        profileName: decoded.color.profile?.name,
+      });
+      Object.assign(slot, {
+        width: decoded.width,
+        height: decoded.height,
+        bits: "libheif decode",
+        formatLabel: extension.toUpperCase(),
+        colorLabel: decoded.color.colorLabel,
+        loading: false,
+      });
+      attachImageUrl(index, slot, URL.createObjectURL(blob));
+      return;
+    }
+
+    const decoded = globalThis.AdvancedCodecs.decodeHdr(bytes, extension);
+    Object.assign(slot, {
+      width: decoded.width,
+      height: decoded.height,
+      bits: "linear float",
+      formatLabel: extension.toUpperCase(),
+      colorLabel: `${describeLinearSpace(decoded.sourceColorSpace)} → sRGB · ${toneName(state.toneMapping)}`,
+      hdrData: decoded,
+      loading: false,
+    });
+    renderHdrPreview(index, slot);
+  } catch (error) {
+    if (!isCurrentSlot(index, token)) return;
+    slot.loading = false;
+    slot.error = friendlyDecodeError(error, extension);
+    render();
+    setTemporaryStatus(slot.error);
+  }
+}
+
+function isCurrentSlot(index, token) {
+  return state.slots[index]?.token === token;
+}
+
+function attachImageUrl(index, slot, url) {
+  if (!isCurrentSlot(index, slot.token)) {
+    URL.revokeObjectURL(url);
+    return;
+  }
+  if (slot.url && slot.url !== url) URL.revokeObjectURL(slot.url);
+  slot.url = url;
   const image = layers[index].image;
   image.onload = () => {
-    const slot = state.slots[index];
-    if (!slot || slot.url !== url) return;
-    slot.width = image.naturalWidth;
-    slot.height = image.naturalHeight;
+    if (!isCurrentSlot(index, slot.token) || slot.url !== url) return;
+    slot.width ||= image.naturalWidth;
+    slot.height ||= image.naturalHeight;
     render();
   };
   image.onerror = () => {
-    const slot = state.slots[index];
-    if (!slot || slot.url !== url) return;
-    clearSlot(index);
-    setTemporaryStatus(`Не вдалося відкрити «${file.name}»`);
+    if (!isCurrentSlot(index, slot.token) || slot.url !== url) return;
+    slot.error = `Не вдалося показати «${slot.file.name}»`;
+    slot.loading = false;
+    render();
   };
   image.src = url;
   render();
+}
+
+async function getHeifModule() {
+  if (!heifModulePromise) {
+    if (typeof globalThis.libheif !== "function") throw new Error("HEIC-декодер недоступний");
+    heifModulePromise = Promise.resolve(globalThis.libheif()).catch((error) => {
+      heifModulePromise = null;
+      throw error;
+    });
+  }
+  return heifModulePromise;
+}
+
+async function decodeHeif(bytes) {
+  const module = await getHeifModule();
+  const decoder = new module.HeifDecoder();
+  const images = decoder.decode(bytes);
+  const image = images?.[0];
+  if (!image) throw new Error("HEIC/HEIF не містить декодованого кадру");
+  const width = image.get_width();
+  const height = image.get_height();
+  const target = { data: new Uint8ClampedArray(width * height * 4), width, height };
+
+  try {
+    const displayed = await new Promise((resolve, reject) => {
+      image.display(target, (result) => result ? resolve(result) : reject(new Error("libheif не повернув RGB-дані")));
+    });
+    return {
+      width,
+      height,
+      rgba: displayed.data ?? target.data,
+      color: globalThis.AdvancedCodecs.extractHeifColorInfo(bytes),
+    };
+  } finally {
+    image.free?.();
+  }
+}
+
+function renderHdrPreview(index, slot) {
+  if (!isCurrentSlot(index, slot.token) || !slot.hdrData) return;
+  try {
+    const rgba = globalThis.AdvancedCodecs.renderHdr(slot.hdrData, state.exposureEv, state.toneMapping);
+    const blob = globalThis.AdvancedCodecs.encodePngRgba(rgba, slot.width, slot.height);
+    slot.colorLabel = `${describeLinearSpace(slot.hdrData.sourceColorSpace)} → sRGB · ${toneName(state.toneMapping)} · ${formatEv(state.exposureEv)}`;
+    attachImageUrl(index, slot, URL.createObjectURL(blob));
+  } catch (error) {
+    slot.error = friendlyDecodeError(error, slot.formatLabel.toLowerCase());
+    render();
+  }
+}
+
+function scheduleHdrRender() {
+  window.clearTimeout(hdrRenderTimer);
+  elements.exposureOutput.value = formatEv(state.exposureEv);
+  hdrRenderTimer = window.setTimeout(() => {
+    state.slots.forEach((slot, index) => {
+      if (slot?.hdrData) renderHdrPreview(index, slot);
+    });
+    render();
+  }, 90);
 }
 
 function clearSlot(index, shouldRender = true) {
@@ -172,14 +341,12 @@ function clearAllSlots() {
 function getGeometry() {
   const x = state.splitX * 100;
   const y = state.splitY * 100;
-
   if (state.mode === 2) {
     return [
       { clip: `polygon(0 0, ${x}% 0, ${x}% 100%, 0 100%)`, cx: x / 2, cy: 50 },
       { clip: `polygon(${x}% 0, 100% 0, 100% 100%, ${x}% 100%)`, cx: (x + 100) / 2, cy: 50 },
     ];
   }
-
   if (state.mode === 3) {
     return [
       { clip: `polygon(0 0, ${x}% 0, ${x}% ${y}%, 0 ${y}%)`, cx: x / 2, cy: y / 2 },
@@ -187,7 +354,6 @@ function getGeometry() {
       { clip: `polygon(0 ${y}%, 100% ${y}%, 100% 100%, 0 100%)`, cx: 50, cy: (y + 100) / 2 },
     ];
   }
-
   return [
     { clip: `polygon(0 0, ${x}% 0, ${x}% ${y}%, 0 ${y}%)`, cx: x / 2, cy: y / 2 },
     { clip: `polygon(${x}% 0, 100% 0, 100% ${y}%, ${x}% ${y}%)`, cx: (x + 100) / 2, cy: y / 2 },
@@ -202,23 +368,42 @@ function zoneMarkup(index, slot) {
       <div class="zone-card">
         <span class="zone-number">${index + 1}</span>
         <strong>Додати зображення</strong>
-        <small>Перетягніть файл сюди<br />або натисніть для вибору</small>
+        <small>JPEG, PNG, TIFF, HEIC, EXR, HDR…<br />Перетягніть або натисніть</small>
+      </div>`;
+  }
+  if (slot.loading) {
+    return `
+      <div class="zone-card zone-card--loading">
+        <span class="decode-spinner" aria-hidden="true"></span>
+        <strong>${escapeHtml(slot.file.name)}</strong>
+        <small>Локальне декодування ${escapeHtml(slot.formatLabel)}…</small>
+      </div>`;
+  }
+  if (slot.error) {
+    return `
+      <div class="zone-card zone-card--error">
+        <span class="zone-number">!</span>
+        <strong>${escapeHtml(slot.error)}</strong>
+        <small>Натисніть, щоб обрати інший файл</small>
+        <button class="zone-remove" type="button" data-remove="${index}">Прибрати</button>
       </div>`;
   }
 
-  const dimensions = slot.width && slot.height ? `${slot.width} × ${slot.height} · ` : "";
+  const dimensions = slot.width && slot.height ? `${slot.width} × ${slot.height}` : "";
+  const details = [dimensions, slot.bits, slot.formatLabel, formatBytes(slot.file.size)].filter(Boolean).join(" · ");
   return `
     <div class="zone-card">
-      <span class="zone-number">${index + 1}</span>
+      <span class="format-badge">${escapeHtml(slot.formatLabel)}</span>
       <strong title="${escapeHtml(slot.file.name)}">${escapeHtml(slot.file.name)}</strong>
-      <small>${dimensions}${formatBytes(slot.file.size)}<br />Натисніть, щоб замінити</small>
+      <small>${escapeHtml(details)}<br /><span class="zone-color">${escapeHtml(slot.colorLabel)}</span></small>
+      ${slot.warning ? `<span class="zone-warning" title="${escapeHtml(slot.warning)}">⚠ ${escapeHtml(slot.warning)}</span>` : ""}
       <button class="zone-remove" type="button" data-remove="${index}">Прибрати</button>
     </div>`;
 }
 
 function escapeHtml(value) {
   const element = document.createElement("span");
-  element.textContent = value;
+  element.textContent = String(value ?? "");
   return element.innerHTML;
 }
 
@@ -235,10 +420,10 @@ function render() {
     const geometryItem = geometry[index];
     const layer = layers[index].layer;
     const zone = zones[index];
-
-    layer.classList.toggle("is-active", active && Boolean(slot));
+    layer.classList.toggle("is-active", active && Boolean(slot?.url) && !slot.error);
     zone.classList.toggle("is-active", active);
-    zone.classList.toggle("has-image", Boolean(slot));
+    zone.classList.toggle("has-image", Boolean(slot?.url) && !slot.loading && !slot.error);
+    zone.classList.toggle("is-loading", Boolean(slot?.loading));
     zone.setAttribute("aria-label", slot ? `Зображення ${index + 1}: ${slot.file.name}. Натисніть, щоб замінити.` : `Додати зображення ${index + 1}`);
 
     if (active && geometryItem) {
@@ -264,18 +449,47 @@ function render() {
     button.setAttribute("aria-pressed", String(active));
   });
 
-  const loaded = activeIndices().filter((index) => state.slots[index]).length;
-  elements.startHint.classList.toggle("is-hidden", loaded > 0);
-  elements.statusText.textContent = loaded
-    ? `Завантажено ${loaded} з ${state.mode} · режим ${state.mode} · ${state.fit === "contain" ? "вписано" : "заповнено"}`
-    : `Очікування зображень · режим ${state.mode}`;
+  const activeSlots = activeIndices().map((index) => state.slots[index]).filter(Boolean);
+  const ready = activeSlots.filter((slot) => slot.url && !slot.error).length;
+  const loading = activeSlots.filter((slot) => slot.loading).length;
+  const hasHdr = activeSlots.some((slot) => slot.hdrData);
+  elements.hdrControls.hidden = !hasHdr;
+  elements.startHint.classList.toggle("is-hidden", activeSlots.length > 0);
+  elements.statusText.textContent = loading
+    ? `Декодування ${loading} ${loading === 1 ? "файла" : "файлів"}…`
+    : ready
+      ? `Завантажено ${ready} з ${state.mode} · режим ${state.mode} · ${state.fit === "contain" ? "вписано" : "заповнено"}`
+      : `Очікування зображень · режим ${state.mode}`;
 }
 
-let statusTimer = 0;
 function setTemporaryStatus(message) {
   window.clearTimeout(statusTimer);
   elements.statusText.textContent = message;
-  statusTimer = window.setTimeout(render, 2800);
+  statusTimer = window.setTimeout(render, 3800);
+}
+
+function toneName(value) {
+  return ({ aces: "ACES", neutral: "Neutral", agx: "AgX", reinhard: "Reinhard" })[value] ?? value;
+}
+
+function formatEv(value) {
+  const numeric = Number(value);
+  return `${numeric > 0 ? "+" : ""}${numeric.toFixed(1)} EV`;
+}
+
+function describeLinearSpace(value) {
+  return ({
+    "linear-rec709": "Linear Rec.709",
+    "linear-display-p3": "Linear Display P3",
+    "linear-rec2020": "Linear Rec.2020",
+    "linear-acescg": "ACEScg",
+  })[value] ?? value ?? "Linear RGB";
+}
+
+function friendlyDecodeError(error, extension) {
+  const detail = error instanceof Error ? error.message : String(error);
+  const prefix = ({ tif: "TIFF", tiff: "TIFF", heic: "HEIC", heif: "HEIF", exr: "EXR", hdr: "HDR" })[extension] ?? "Файл";
+  return `${prefix}: ${detail}`;
 }
 
 elements.modeButtons.forEach((button) => {
@@ -290,6 +504,16 @@ elements.fitMode.addEventListener("change", () => {
   render();
 });
 
+elements.exposureInput.addEventListener("input", () => {
+  state.exposureEv = Number(elements.exposureInput.value);
+  scheduleHdrRender();
+});
+
+elements.toneMapping.addEventListener("change", () => {
+  state.toneMapping = elements.toneMapping.value;
+  scheduleHdrRender();
+});
+
 elements.resetSplit.addEventListener("click", () => {
   state.splitX = 0.5;
   state.splitY = 0.5;
@@ -297,18 +521,12 @@ elements.resetSplit.addEventListener("click", () => {
 });
 
 elements.clearAll.addEventListener("click", clearAllSlots);
-
-elements.fileInput.addEventListener("change", () => {
-  loadFiles(elements.fileInput.files, state.pickerStartIndex);
-});
+elements.fileInput.addEventListener("change", () => loadFiles(elements.fileInput.files, state.pickerStartIndex));
 
 elements.fullscreenButton.addEventListener("click", async () => {
   try {
-    if (document.fullscreenElement) {
-      await document.exitFullscreen();
-    } else {
-      await document.documentElement.requestFullscreen();
-    }
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else await document.documentElement.requestFullscreen();
   } catch {
     setTemporaryStatus("Браузер не дозволив повноекранний режим");
   }
@@ -329,7 +547,6 @@ function updateSplitFromPointer(event, axis) {
   if (!bounds.width || !bounds.height) return;
   const x = Math.min(0.98, Math.max(0.02, (event.clientX - bounds.left) / bounds.width));
   const y = Math.min(0.98, Math.max(0.02, (event.clientY - bounds.top) / bounds.height));
-
   if (axis === "x" || axis === "both") state.splitX = x;
   if (state.mode > 2 && (axis === "y" || axis === "both")) state.splitY = y;
   render();
@@ -375,7 +592,6 @@ elements.crossHandle.addEventListener("pointerdown", (event) => startDividerDrag
 elements.stage.addEventListener("keydown", (event) => {
   const step = event.shiftKey ? 0.05 : 0.01;
   let handled = true;
-
   if (event.key === "ArrowLeft") state.splitX = Math.max(0.02, state.splitX - step);
   else if (event.key === "ArrowRight") state.splitX = Math.min(0.98, state.splitX + step);
   else if (event.key === "ArrowUp" && state.mode > 2) state.splitY = Math.max(0.02, state.splitY - step);
@@ -384,7 +600,6 @@ elements.stage.addEventListener("keydown", (event) => {
     state.splitX = 0.5;
     state.splitY = 0.5;
   } else handled = false;
-
   if (handled) {
     event.preventDefault();
     render();
@@ -397,4 +612,5 @@ window.addEventListener("beforeunload", () => {
   });
 });
 
+elements.exposureOutput.value = formatEv(state.exposureEv);
 render();

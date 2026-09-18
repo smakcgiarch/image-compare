@@ -32,6 +32,22 @@
         </div>
 
         <div class="toolbar">
+          <div id="hdrControls" class="hdr-controls" hidden>
+            <label class="exposure-control">
+              <span class="control-label">Exposure</span>
+              <input id="exposureInput" type="range" min="-8" max="8" step="0.25" value="0" />
+              <output id="exposureOutput" for="exposureInput">0.0 EV</output>
+            </label>
+            <label class="tone-control">
+              <span class="control-label">Tone map</span>
+              <select id="toneMapping" aria-label="HDR tonemapping">
+                <option value="aces">ACES</option>
+                <option value="neutral">Neutral</option>
+                <option value="agx">AgX</option>
+                <option value="reinhard">Reinhard</option>
+              </select>
+            </label>
+          </div>
           <label class="fit-control">
             <span class="control-label">Масштаб</span>
             <select id="fitMode" aria-label="Масштабування зображень">
@@ -99,7 +115,13 @@
       </footer>
     </div>
 
-    <input id="fileInput" class="visually-hidden" type="file" accept="image/*" multiple />
+    <input
+      id="fileInput"
+      class="visually-hidden"
+      type="file"
+      accept="image/*,.tif,.tiff,.heic,.heif,.exr,.hdr"
+      multiple
+    />
 
     <dialog id="colorDialog" class="info-dialog">
       <form method="dialog">
@@ -109,19 +131,26 @@
         <div>
           <h2>Відображення кольору</h2>
           <p>
-            Файли показуються напряму через браузерний елемент <code>&lt;img&gt;</code>. Тулза не перемальовує
-            їх у canvas, не конвертує та не видаляє вбудований ICC-профіль.
+            JPEG, PNG, WebP, AVIF та інші нативні формати показуються напряму через <code>&lt;img&gt;</code> —
+            вбудований ICC-профіль обробляє сам браузер без перекодування файла.
           </p>
           <p>
-            Фактичний результат залежить від color management браузера, профілю монітора в операційній системі
-            та підтримки формату. Для точної оцінки використовуйте актуальний Chrome, Edge або Firefox на
-            відкаліброваному дисплеї.
+            TIFF і HEIC/HEIF декодуються локально. Сумісний RGB ICC або NCLX-профіль переноситься у службовий
+            PNG-preview, після чого браузер виконує color transform. EXR/HDR перетворюються з linear float у sRGB
+            через обраний tonemapping та Exposure.
+          </p>
+          <p>
+            Фінальний вигляд також залежить від профілю монітора в операційній системі. Для точної оцінки
+            використовуйте актуальний Chrome, Edge або Firefox на відкаліброваному дисплеї. Файли нікуди не
+            завантажуються.
           </p>
           <button class="dialog-close" value="close">Зрозуміло</button>
         </div>
       </form>
     </dialog>
 
+    <script src="vendor/advanced-codecs.js"></script>
+    <script src="vendor/libheif-bundle.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
